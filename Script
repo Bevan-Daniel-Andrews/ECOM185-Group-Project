@@ -1,0 +1,47 @@
+library(rvest)
+library(dplyr)
+library(stringr)
+library(purrr)
+ 
+base_url <- "https://www.uktradeinfo.com/trade-data/overseas/"
+ 
+main_page <- read_html(base_url)
+ 
+url_links <- main_page %>%
+  html_elements("a") %>%
+  html_attr("href") %>%
+  str_subset("/trade-data/overseas/\\d{4}/") %>%
+  unique()
+ 
+# Filter to only include years 2012 to 2016
+target_years <- 2012:2016
+url_links_filtered <- url_links[str_extract(url_links, "\\d{4}") %in% as.character(target_years)]
+ 
+url_links_filtered <- paste0("https://www.uktradeinfo.com", url_links_filtered)
+ 
+ 
+download_folder <- "uk_trade_data"
+if (dir_exists(download_folder)) {
+  dir_delete(download_folder)
+}
+dir_create(download_folder)
+ 
+download_spreadsheets <- function(url) {
+  year_page <- read_html(url)
+  file_links <- year_page %>%
+    html_elements("a") %>%
+    html_attr("href") %>%
+    str_subset("\\.xls[x]?$")
+  file_links <- ifelse(str_starts(file_links, "http"),
+                       file_links,
+                       paste0("https://www.uktradeinfo.com", file_links))
+  walk(file_links, function(file_url) {
+    file_name <- basename(file_url)
+    dest_file <- file.path(download_folder, file_name)
+    message("Downloading: ", file_name)
+    download.file(file_url, destfile = dest_file, mode = "wb")
+  })
+}
+ 
+# Download files only for 2012–2016
+walk(url_links_filtered, download_spreadsheets)
