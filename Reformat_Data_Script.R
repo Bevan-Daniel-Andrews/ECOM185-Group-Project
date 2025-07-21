@@ -9,6 +9,7 @@ library(dplyr)
 library(purrr)
 library(stringr)
 library(lubridate)
+library(tidyr)
 
 # === Step 1: Define and unzip ===
 zip_path <- "Trade_Data_zip.zip"  # Update if in subfolder
@@ -171,26 +172,40 @@ combined_data_categorised <- combined_data_clean %>%
     )
   )
 
-# === Step 1: Compute year-on-year change in trade value ===
-combined_data_categorised <- combined_data_categorised %>%
-  arrange(Code, Trade_Type, Year) %>%
-  group_by(Code, Trade_Type) %>%
-  mutate(
-    delta_value = Value - lag(Value)
-  ) %>%
-  ungroup()
+# === Generalised DiD setup: EU exports only, 2015–2016 ===
 
-# === Step 2: Create treatment and time dummies ===
-combined_data_categorised <- combined_data_categorised %>%
+# Step A: Filter for EU export data for years 2015 and 2016
+eu_exports_did <- combined_data_categorised %>%
+  filter(Trade_Type == "EU export", year %in% c("2015", "2016"))
+
+# Step B: Aggregate yearly trade values per product (ensure numeric year)
+eu_annual_totals <- eu_exports_did %>%
+  mutate(year = as.integer(year)) %>%
+  group_by(Code, year) %>%
+  summarise(annual_value = sum(Value, na.rm = TRUE), .groups = "drop")
+
+# Step C: Reshape and compute difference
+eu_diff_by_code <- eu_annual_totals %>%
+  pivot_wider(names_from = year, values_from = annual_value, names_prefix = "y") %>%
+  filter(!is.na(y2015), !is.na(y2016)) %>%
   mutate(
-    post = if_else(as.integer(year) >= 2016, 1, 0),
-    eu = if_else(str_detect(Trade_Type, "EU"), 1, 0),
+    delta_value = y2016 - y2015
+  ) %>%
+  left_join(
+    combined_data_categorised %>%
+      filter(year == "2015", Trade_Type == "EU export") %>%
+      select(Code, tw_exposure) %>%
+      distinct(),
+    by = "Code"
+  ) %>%
+  mutate(
     treat = if_else(tw_exposure == "High", 1, 0)
   )
 
-# === Baseline regression: effect of high exposure on trade change ===
-baseline_model <- lm(delta_value ~ treat, data = combined_data_categorised)
-summary(baseline_model)
+# Step D: Run generalised DiD regression
+baseline_did_model <- lm(delta_value ~ treat, data = eu_diff_by_code)
+summary(baseline_did_model)
+
 
 # === Triple differences regression ===
 ddd_model <- lm(delta_value ~ post * eu * treat, data = combined_data_categorised)
