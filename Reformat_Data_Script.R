@@ -90,7 +90,7 @@ tariff_clean <- tariff_data %>%
     year = 3,
     simple_average = 10,
     trade_weighted = 11,
-    HS = 16
+    HS = 13
   ) %>%
   mutate(year = as.character(year))
 
@@ -115,5 +115,86 @@ combined_data <- combined_data %>%
 
 # === Step 13: Final check ===
 glimpse(combined_data)
+
+# Count how many rows have NA in either simple_average or trade_weighted
+na_counts <- combined_data %>%
+  summarise(
+    simple_average_NA = sum(is.na(simple_average)),
+    trade_weighted_NA = sum(is.na(trade_weighted)),
+    both_NA = sum(is.na(simple_average) & is.na(trade_weighted))
+  )
+
+print(na_counts)
+
+# Remove rows with NA in either 'simple_average' or 'trade_weighted'
+combined_data_clean <- combined_data %>%
+  filter(!is.na(simple_average), !is.na(trade_weighted))
+
+# Summary statistics for tariff columns
+tariff_summary <- combined_data_clean %>%
+  summarise(
+    simple_avg_min = min(simple_average, na.rm = TRUE),
+    simple_avg_median = median(simple_average, na.rm = TRUE),
+    simple_avg_mean = mean(simple_average, na.rm = TRUE),
+    simple_avg_max = max(simple_average, na.rm = TRUE),
+    trade_weighted_min = min(trade_weighted, na.rm = TRUE),
+    trade_weighted_median = median(trade_weighted, na.rm = TRUE),
+    trade_weighted_mean = mean(trade_weighted, na.rm = TRUE),
+    trade_weighted_max = max(trade_weighted, na.rm = TRUE)
+  )
+
+print(tariff_summary)
+
+# Quantile-based summary
+quantiles <- combined_data_clean %>%
+  summarise(
+    simple_avg_Q1 = quantile(simple_average, 0.25, na.rm = TRUE),
+    simple_avg_Q3 = quantile(simple_average, 0.75, na.rm = TRUE),
+    trade_weighted_Q1 = quantile(trade_weighted, 0.25, na.rm = TRUE),
+    trade_weighted_Q3 = quantile(trade_weighted, 0.75, na.rm = TRUE)
+  )
+
+print(quantiles)
+
+# === Add tariff exposure categories ===
+combined_data_categorised <- combined_data_clean %>%
+  mutate(
+    sa_exposure = case_when(
+      simple_average <= 1.9 ~ "Low",
+      simple_average <= 7.8 ~ "Medium",
+      TRUE ~ "High"
+    ),
+    tw_exposure = case_when(
+      trade_weighted <= 1.35 ~ "Low",
+      trade_weighted <= 7.08 ~ "Medium",
+      TRUE ~ "High"
+    )
+  )
+
+# === Step 1: Compute year-on-year change in trade value ===
+combined_data_categorised <- combined_data_categorised %>%
+  arrange(Code, Trade_Type, Year) %>%
+  group_by(Code, Trade_Type) %>%
+  mutate(
+    delta_value = Value - lag(Value)
+  ) %>%
+  ungroup()
+
+# === Step 2: Create treatment and time dummies ===
+combined_data_categorised <- combined_data_categorised %>%
+  mutate(
+    post = if_else(as.integer(year) >= 2016, 1, 0),
+    eu = if_else(str_detect(Trade_Type, "EU"), 1, 0),
+    treat = if_else(tw_exposure == "High", 1, 0)
+  )
+
+# === Baseline regression: effect of high exposure on trade change ===
+baseline_model <- lm(delta_value ~ treat, data = combined_data_categorised)
+summary(baseline_model)
+
+# === Triple differences regression ===
+ddd_model <- lm(delta_value ~ post * eu * treat, data = combined_data_categorised)
+summary(ddd_model)
+
 
 
