@@ -1,3 +1,5 @@
+rm(list = ls())
+
 # === Load libraries ===
 library(readxl)
 library(dplyr)
@@ -179,6 +181,10 @@ tariff_clean <- tariff_data %>%
   ) %>%
   mutate(year = as.character(year))
 
+# === Step X: Deduplicate tariff data ===
+tariff_clean_dedup <- tariff_clean %>%
+  distinct(year, HS, simple_average, trade_weighted, .keep_all = TRUE)
+
 # === Step 10: Extract year from combined_all$Date and convert to character ===
 combined_all <- combined_all %>%
   mutate(
@@ -188,17 +194,13 @@ combined_all <- combined_all %>%
 
 # === Step 11: Join tariff data ===
 combined_all <- combined_all %>%
-  left_join(
-    tariff_clean,
-    by = c("Code" = "HS", "year" = "year"),
-    relationship = "many-to-many"  # Helps avoid join warning
-  )
+  left_join(tariff_clean_dedup, by = c("Code" = "HS", "year" = "year"))
 
 # === Step 12: Reorder new columns for readability ===
 combined_all <- combined_all %>%
   relocate(simple_average, trade_weighted, .after = Value)
 
-# Count rows where either tariff column is missing
+# === Step 13: Check for missing tariff values ===
 missing_tariffs <- combined_all %>%
   summarise(
     total_rows = n(),
@@ -210,7 +212,75 @@ missing_tariffs <- combined_all %>%
 
 print(missing_tariffs)
 
+# === Step 14: Remove rows with missing tariff data ===
 combined_all_clean <- combined_all %>%
   filter(!is.na(simple_average), !is.na(trade_weighted))
+
+# === Step 15: Summary statistics for tariff variables ===
+tariff_summary <- combined_all_clean %>%
+  summarise(
+    simple_avg_min    = min(simple_average, na.rm = TRUE),
+    simple_avg_median = median(simple_average, na.rm = TRUE),
+    simple_avg_mean   = mean(simple_average, na.rm = TRUE),
+    simple_avg_max    = max(simple_average, na.rm = TRUE),
+    trade_weighted_min    = min(trade_weighted, na.rm = TRUE),
+    trade_weighted_median = median(trade_weighted, na.rm = TRUE),
+    trade_weighted_mean   = mean(trade_weighted, na.rm = TRUE),
+    trade_weighted_max    = max(trade_weighted, na.rm = TRUE)
+  )
+
+print(tariff_summary)
+
+# === Step 16: Quantile-based summary statistics ===
+quantiles <- combined_all_clean %>%
+  summarise(
+    simple_avg_Q1 = quantile(simple_average, 0.25, na.rm = TRUE),
+    simple_avg_Q3 = quantile(simple_average, 0.75, na.rm = TRUE),
+    trade_weighted_Q1 = quantile(trade_weighted, 0.25, na.rm = TRUE),
+    trade_weighted_Q3 = quantile(trade_weighted, 0.75, na.rm = TRUE)
+  )
+
+print(quantiles)
+
+# === Step 17: Visualise tariff distributions ===
+library(ggplot2)
+
+# Histogram: Simple average
+ggplot(combined_all_clean, aes(x = simple_average)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Simple Average Tariffs", x = "Simple Average Tariff (%)", y = "Frequency")
+
+# Histogram: Trade-weighted
+ggplot(combined_all_clean, aes(x = trade_weighted)) +
+  geom_histogram(bins = 30, fill = "darkgreen", color = "white") +
+  labs(title = "Distribution of Trade-Weighted Tariffs", x = "Trade-Weighted Tariff (%)", y = "Frequency")
+
+# Boxplot: Simple average
+ggplot(combined_all_clean, aes(y = simple_average)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Boxplot: Simple Average Tariffs", y = "Tariff (%)")
+
+# Boxplot: Trade-weighted
+ggplot(combined_all_clean, aes(y = trade_weighted)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Boxplot: Trade-Weighted Tariffs", y = "Tariff (%)")
+
+library(dplyr)
+library(ggplot2)
+
+# === Step XX: Count unique products per trade type, year, and month ===
+product_counts <- combined_all_clean %>%
+  group_by(Year, Month, Trade_Type) %>%
+  summarise(
+    Unique_Products = n_distinct(Code),
+    .groups = "drop"
+  )
+
+# View result
+print(product_counts)
+print(product_counts, n = Inf)
+
+
+
 
 
