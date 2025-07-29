@@ -8,6 +8,8 @@ library(stringr)
 library(lubridate)
 library(tidyr)
 
+## Import and export data for EU and non-EU trade 
+
 # === Step 1: Define and unzip ===
 zip_path <- "Trade_Data_zip.zip"  # Update if in subfolder
 extract_dir <- tempfile()
@@ -167,6 +169,8 @@ glimpse(combined_all)
 combined_all <- combined_all %>%
   filter(!is.na(Code), !is.na(Value))
 
+## MFN tariff data
+
 # === Step 8: Load tariff data ===
 tariff_path <- "Tarriff data.xlsx"
 tariff_data <- read_excel(tariff_path)
@@ -216,6 +220,8 @@ print(missing_tariffs)
 combined_all_clean <- combined_all %>%
   filter(!is.na(simple_average), !is.na(trade_weighted))
 
+## Summary statistics 
+
 # === Step 15: Summary statistics for tariff variables ===
 tariff_summary <- combined_all_clean %>%
   summarise(
@@ -241,6 +247,8 @@ quantiles <- combined_all_clean %>%
   )
 
 print(quantiles)
+
+## Visualisations 
 
 # === Step 17: Visualise tariff distributions ===
 library(ggplot2)
@@ -279,6 +287,71 @@ product_counts <- combined_all_clean %>%
 # View result
 print(product_counts)
 print(product_counts, n = Inf)
+
+## Regressions ##
+
+# === Step 18: Filter for EU exports only ===
+eu_exports <- combined_all_clean %>%
+  filter(Trade_Type == "EU export")
+
+# === Step 19: Aggregate total export value by product (Code) and Year ===
+exports_yearly <- eu_exports %>%
+  group_by(Code, Year) %>%
+  summarise(total_export = sum(Value, na.rm = TRUE), .groups = "drop")
+
+# === Step 20: Create wide-format data for 2015–2016 export comparison ===
+exports_wide <- exports_yearly %>%
+  filter(Year %in% c(2015, 2016)) %>%
+  pivot_wider(names_from = Year, values_from = total_export, names_prefix = "year_") %>%
+  filter(!is.na(year_2015), !is.na(year_2016)) %>%
+  mutate(export_growth = log(year_2016 + 1) - log(year_2015 + 1))  # Log difference growth
+
+# === Step 21: Join unique tariff values by product (HS2 Code) ===
+tariff_lookup <- combined_all_clean %>%
+  select(Code, simple_average, trade_weighted) %>%
+  distinct()
+
+exports_model_data <- exports_wide %>%
+  left_join(tariff_lookup, by = "Code")
+
+# === Step 22A: Regression with simple average tariff + 2015 export value ===
+baseline_model_simple_ctrl <- lm(
+  export_growth ~ simple_average + year_2015,
+  data = exports_model_data
+)
+summary(baseline_model_simple_ctrl)
+
+# === Step 22B: Regression with trade-weighted tariff + 2015 export value ===
+baseline_model_weighted_ctrl <- lm(
+  export_growth ~ trade_weighted + year_2015,
+  data = exports_model_data
+)
+summary(baseline_model_weighted_ctrl)
+
+# === Step 22C: Create log of 2015 export value
+exports_model_data <- exports_model_data %>%
+  mutate(log_export_2015 = log(year_2015 + 1))
+
+# === Step 22D: Run regressions using log of 2015 export value
+baseline_model_simple_log <- lm(export_growth ~ simple_average + log_export_2015, data = exports_model_data)
+baseline_model_weighted_log <- lm(export_growth ~ trade_weighted + log_export_2015, data = exports_model_data)
+
+library(broom)
+
+# Summary of both models
+tidy_simple_log <- tidy(baseline_model_simple_log)
+tidy_weighted_log <- tidy(baseline_model_weighted_log)
+
+print(tidy_simple_log)
+print(tidy_weighted_log)
+
+## Triple diff-in-diff regressions 
+
+
+
+
+
+
 
 
 
