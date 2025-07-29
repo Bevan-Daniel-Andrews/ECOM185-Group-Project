@@ -345,7 +345,152 @@ tidy_weighted_log <- tidy(baseline_model_weighted_log)
 print(tidy_simple_log)
 print(tidy_weighted_log)
 
-## Triple diff-in-diff regressions 
+# === Step 22E: Categorise tariff exposure levels (including Zero category) ===
+
+exports_model_data <- exports_model_data %>%
+  mutate(
+    simple_avg_cat = case_when(
+      simple_average == 0 ~ "Zero",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.10, na.rm = TRUE) ~ "Low",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.25, na.rm = TRUE) ~ "Low-Medium",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.50, na.rm = TRUE) ~ "Medium",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.75, na.rm = TRUE) ~ "High",
+      TRUE ~ "Extreme"
+    ),
+    trade_weighted_cat = case_when(
+      trade_weighted == 0 ~ "Zero",
+      trade_weighted <= quantile(trade_weighted[trade_weighted > 0], 0.10, na.rm = TRUE) ~ "Low",
+      trade_weighted <= quantile(trade_weighted[trade_weighted > 0], 0.25, na.rm = TRUE) ~ "Low-Medium",
+      trade_weighted <= quantile(trade_weighted[trade_weighted > 0], 0.50, na.rm = TRUE) ~ "Medium",
+      trade_weighted <= quantile(trade_weighted[trade_weighted > 0], 0.75, na.rm = TRUE) ~ "High",
+      TRUE ~ "Extreme"
+    )
+  )
+
+# Optional: convert to ordered factor (Zero is now the base level)
+exports_model_data <- exports_model_data %>%
+  mutate(
+    simple_avg_cat = factor(simple_avg_cat, levels = c("Zero", "Low", "Low-Medium", "Medium", "High", "Extreme"), ordered = TRUE),
+    trade_weighted_cat = factor(trade_weighted_cat, levels = c("Zero", "Low", "Low-Medium", "Medium", "High", "Extreme"), ordered = TRUE)
+  )
+
+
+# === Step 22F: Run categorical regression model (simple average) ===
+model_simple_cat <- lm(export_growth ~ simple_avg_cat + log_export_2015, data = exports_model_data)
+tidy_simple_cat <- tidy(model_simple_cat)
+
+# === Step 22G: Run categorical regression model (trade weighted) ===
+model_weighted_cat <- lm(export_growth ~ trade_weighted_cat + log_export_2015, data = exports_model_data)
+tidy_weighted_cat <- tidy(model_weighted_cat)
+
+# === Step 22H: Print regression outputs ===
+print(tidy_simple_cat)
+print(tidy_weighted_cat)
+
+glance_simple_cat <- glance(model_simple_cat)
+glance_weighted_cat <- glance(model_weighted_cat)
+
+library(readxl)
+library(dplyr)
+
+# === Load HS02 lookup table ===
+hs02_lookup <- read_excel("HS 02 lookup.xlsx")
+
+# Ensure columns are named correctly
+names(hs02_lookup) <- c("HS_code", "Goods_Description")
+
+# === Match by product description and merge HS2 codes ===
+combined_all_clean <- combined_all_clean %>%
+  left_join(hs02_lookup, by = c("Code" = "Goods_Description"))
+
+# === Preview updated dataset ===
+glimpse(combined_all_clean)
+
+# Categorise simple average tariffs including Zero category
+combined_all_clean <- combined_all_clean %>%
+  mutate(
+    simple_avg_cat = case_when(
+      simple_average == 0 ~ "Zero",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.10, na.rm = TRUE) ~ "Low",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.25, na.rm = TRUE) ~ "Low-Medium",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.50, na.rm = TRUE) ~ "Medium",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.75, na.rm = TRUE) ~ "High",
+      TRUE ~ "Extreme"
+    ),
+    simple_avg_cat = factor(simple_avg_cat, levels = c("Zero", "Low", "Low-Medium", "Medium", "High", "Extreme"))
+  )
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# Step 1: Ensure simple_avg_cat is available
+combined_all_clean <- combined_all_clean %>%
+  mutate(
+    simple_avg_cat = case_when(
+      simple_average == 0 ~ "Zero",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.10, na.rm = TRUE) ~ "Low",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.25, na.rm = TRUE) ~ "Low-Medium",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.50, na.rm = TRUE) ~ "Medium",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.75, na.rm = TRUE) ~ "High",
+      TRUE ~ "Extreme"
+    ),
+    simple_avg_cat = factor(
+      simple_avg_cat,
+      levels = c("Zero", "Low", "Low-Medium", "Medium", "High", "Extreme"),
+      ordered = TRUE
+    )
+  )
+
+# Step 2: Filter to EU exports in 2015
+eu_exports_2015 <- combined_all_clean %>%
+  filter(Trade_Type == "EU export", Year == 2015)
+
+# Step 3: Aggregate export values by tariff exposure
+export_plot_data <- eu_exports_2015 %>%
+  group_by(simple_avg_cat) %>%
+  summarise(
+    total_export_billion = sum(Value, na.rm = TRUE) / 1e6,  # £000 → £bn
+    .groups = "drop"
+  )
+
+# Step 4: Define manual colours
+tariff_colors <- c(
+  "Zero" = "#1b9e77",
+  "Low" = "#d95f02",
+  "Low-Medium" = "#7570b3",
+  "Medium" = "#e7298a",
+  "High" = "#66a61e",
+  "Extreme" = "#e6ab02"
+)
+
+# Step 5: Plot with capped y-axis and fixed breaks
+ggplot(export_plot_data, aes(x = simple_avg_cat, y = total_export_billion, fill = simple_avg_cat)) +
+  geom_col(show.legend = TRUE) +
+  labs(
+    title = "Export Value by Tariff Exposure (EU Exports, 2015)",
+    x = "Tariff Exposure Category",
+    y = "Export Value (£bn)",
+    fill = "Tariff Exposure"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 50),
+    breaks = seq(0, 50, by = 10),
+    labels = label_comma()
+  ) +
+  scale_fill_manual(values = tariff_colors) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    legend.position = "right",
+    axis.text.x = element_blank()  # Hides redundant x-axis labels
+  )
+
+
+
+
+
+
 
 
 
