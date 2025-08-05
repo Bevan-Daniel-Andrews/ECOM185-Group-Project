@@ -86,7 +86,7 @@ combined_all_clean <- combined_all_clean %>%
 eu_exports_2015 <- combined_all_clean %>%
   filter(Trade_Type == "EU export", Year == 2015)
 
-# Step 3: Aggregate export values by tariff exposure
+# Step 5.2: Aggregate export values by tariff exposure
 export_plot_data <- eu_exports_2015 %>%
   group_by(simple_avg_cat) %>%
   summarise(
@@ -94,7 +94,7 @@ export_plot_data <- eu_exports_2015 %>%
     .groups = "drop"
   )
 
-# Step 5.2: Define manual colours
+# Step 5.3: Define manual colours
 tariff_colors <- c(
   "Zero" = "#1b9e77",
   "Low" = "#d95f02",
@@ -104,7 +104,7 @@ tariff_colors <- c(
   "Extreme" = "#e6ab02"
 )
 
-# Step 5.3: Plot with capped y-axis and fixed breaks
+# Step 5.4: Plot with capped y-axis and fixed breaks
 ggplot(export_plot_data, aes(x = simple_avg_cat, y = total_export_billion, fill = simple_avg_cat)) +
   geom_col(show.legend = TRUE) +
   labs(

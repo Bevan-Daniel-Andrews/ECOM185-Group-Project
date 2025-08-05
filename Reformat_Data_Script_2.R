@@ -220,7 +220,7 @@ print(missing_tariffs)
 combined_all_clean <- combined_all %>%
   filter(!is.na(simple_average), !is.na(trade_weighted))
 
-## Summary statistics 
+## Summary statistics and visualisations 
 
 # === Step 15: Summary statistics for tariff variables ===
 tariff_summary <- combined_all_clean %>%
@@ -485,6 +485,68 @@ ggplot(export_plot_data, aes(x = simple_avg_cat, y = total_export_billion, fill 
     legend.position = "right",
     axis.text.x = element_blank()  # Hides redundant x-axis labels
   )
+
+# Step 1: Filter export data only
+exports_all <- combined_all_clean %>%
+  filter(Trade_Type %in% c("EU export", "Non-EU export"))
+
+# Step 2: Aggregate export value by product, year, and trade type
+exports_grouped <- exports_all %>%
+  group_by(Code, Year, Trade_Type) %>%
+  summarise(export_value = sum(Value, na.rm = TRUE), .groups = "drop")
+
+# Step 3: Pivot to wide format to calculate growth
+exports_wide_ddd <- exports_grouped %>%
+  pivot_wider(names_from = Year, values_from = export_value, names_prefix = "year_") %>%
+  filter(!is.na(year_2015), !is.na(year_2016)) %>%
+  mutate(export_growth = log(year_2016 + 1) - log(year_2015 + 1))
+
+# Step 4: Recreate tariff exposure categories (from scratch to avoid inherited ordering)
+tariff_bins <- combined_all_clean %>%
+  mutate(
+    simple_avg_cat = case_when(
+      simple_average == 0 ~ "Zero",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.10, na.rm = TRUE) ~ "Low",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.25, na.rm = TRUE) ~ "Low-Medium",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.50, na.rm = TRUE) ~ "Medium",
+      simple_average <= quantile(simple_average[simple_average > 0], 0.75, na.rm = TRUE) ~ "High",
+      TRUE ~ "Extreme"
+    ),
+    trade_weighted_cat = case_when(
+      trade_weighted == 0 ~ "Zero",
+      trade_weighted <= quantile(trade_weighted[trade_weighted > 0], 0.10, na.rm = TRUE) ~ "Low",
+      trade_weighted <= quantile(trade_weighted[trade_weighted > 0], 0.25, na.rm = TRUE) ~ "Low-Medium",
+      trade_weighted <= quantile(trade_weighted[trade_weighted > 0], 0.50, na.rm = TRUE) ~ "Medium",
+      trade_weighted <= quantile(trade_weighted[trade_weighted > 0], 0.75, na.rm = TRUE) ~ "High",
+      TRUE ~ "Extreme"
+    )
+  ) %>%
+  mutate(
+    simple_avg_cat = factor(simple_avg_cat, levels = c("Zero", "Low", "Low-Medium", "Medium", "High", "Extreme"), ordered = FALSE),
+    trade_weighted_cat = factor(trade_weighted_cat, levels = c("Zero", "Low", "Low-Medium", "Medium", "High", "Extreme"), ordered = FALSE)
+  ) %>%
+  select(Code, Trade_Type, simple_avg_cat, trade_weighted_cat) %>%
+  distinct()
+
+# Step 5: Join tariff exposure categories
+exports_model_ddd_cat <- exports_wide_ddd %>%
+  left_join(tariff_bins, by = c("Code", "Trade_Type")) %>%
+  filter(!is.na(simple_avg_cat), !is.na(trade_weighted_cat))
+
+# Step 6: Add EU dummy
+exports_model_ddd_cat <- exports_model_ddd_cat %>%
+  mutate(
+    eu = if_else(Trade_Type == "EU export", 1, 0)
+  )
+
+# Step 7: Triple difference model using simple average category (dummy-coded)
+model_ddd_simple_cat <- lm(export_growth ~ simple_avg_cat * eu, data = exports_model_ddd_cat)
+summary(model_ddd_simple_cat)
+
+# Step 8: Triple difference model using trade-weighted category (dummy-coded)
+model_ddd_weighted_cat <- lm(export_growth ~ trade_weighted_cat * eu, data = exports_model_ddd_cat)
+summary(model_ddd_weighted_cat)
+
 
 
 
